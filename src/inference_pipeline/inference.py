@@ -30,7 +30,7 @@ DEFAULT_TARGET_ENCODER = PROJECT_ROOT / "models" / "target_encoder.pkl"
 TRAIN_FE_PATH = PROJECT_ROOT / "data" / "processed" / "feature_engineered_train.csv"
 DEFAULT_OUTPUT = PROJECT_ROOT / "predictions.csv"
 
-print("📂 Inference using project root:", PROJECT_ROOT)
+print("Inference using project root:", PROJECT_ROOT)
 
 # Load training feature columns (strict schema from training dataset)
 if TRAIN_FE_PATH.exists():
@@ -80,12 +80,21 @@ def predict(
         y_true = df["price"].tolist()
         df = df.drop(columns=["price"])
 
-    # Step 5: Align columns with training schema
+    # Step 5: Align columns with training schema (names + presence)
     if TRAIN_FEATURE_COLUMNS is not None:
         df = df.reindex(columns=TRAIN_FEATURE_COLUMNS, fill_value=0)
 
     # Step 6: Load model & predict
     model = load(model_path)
+
+    # Ensure column ORDER exactly matches what the model was trained on.
+    # The CSV's column order can drift from the model's internal booster
+    # feature order (e.g. if columns were appended later in preprocessing),
+    # and XGBoost's inplace_predict is strict about exact order.
+    model_feature_names = model.get_booster().feature_names
+    if model_feature_names is not None:
+        df = df.reindex(columns=model_feature_names, fill_value=0)
+
     preds = model.predict(df)
 
     # Step 7: Build output
@@ -120,4 +129,4 @@ if __name__ == "__main__":
     )
 
     preds_df.to_csv(args.output, index=False)
-    print(f"✅ Predictions saved to {args.output}")
+    print(f"Predictions saved to {args.output}")
