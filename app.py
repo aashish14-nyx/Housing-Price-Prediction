@@ -4,16 +4,19 @@ import requests
 import plotly.express as px
 import boto3, os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()  # reads .env file in project root (local dev only)
 
 # ============================
-# Config
+# Config (all from environment variables)
 # ============================
 API_URL = os.environ.get("API_URL", "http://127.0.0.1:8000/predict")
 S3_BUCKET = os.getenv("S3_BUCKET", "housing-regression-data")
-REGION = os.getenv("AWS_REGION", "us-east-1")
-S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://localhost:9000")
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+REGION = os.getenv("AWS_REGION", "auto")
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
 s3 = boto3.client(
     "s3",
@@ -24,15 +27,15 @@ s3 = boto3.client(
 )
 
 def load_from_s3(key, local_path):
-    """Download from S3 if not already cached locally."""
+    """Download from S3/R2 if not already cached locally."""
     local_path = Path(local_path)
     if not local_path.exists():
         os.makedirs(local_path.parent, exist_ok=True)
-        st.info(f"Downloading {key} from S3...")
+        st.info(f"Downloading {key} from storage...")
         s3.download_file(S3_BUCKET, key, str(local_path))
     return str(local_path)
 
-# Paths (ensure available locally by fetching from S3 if missing)
+# Paths (ensure available locally by fetching from storage if missing)
 HOLDOUT_ENGINEERED_PATH = load_from_s3(
     "processed/feature_engineered_holdout.csv",
     "data/processed/feature_engineered_holdout.csv"
@@ -112,7 +115,6 @@ if st.button("Show Predictions"):
             if actuals is not None and len(actuals) == len(view):
                 view["actual_price"] = pd.Series(actuals, index=view.index).astype(float)
 
-            # Metrics
             mae = (view["prediction"] - view["actual_price"]).abs().mean()
             rmse = ((view["prediction"] - view["actual_price"]) ** 2).mean() ** 0.5
             avg_pct_error = ((view["prediction"] - view["actual_price"]).abs() / view["actual_price"]).mean() * 100
@@ -131,9 +133,6 @@ if st.button("Show Predictions"):
             with c3:
                 st.metric("Avg % Error", f"{avg_pct_error:.2f}%")
 
-            # ============================
-            # Yearly Trend Chart
-            # ============================
             if region == "All":
                 yearly_data = disp_df[disp_df["year"] == year].copy()
                 idx_all = yearly_data.index
@@ -156,10 +155,7 @@ if st.button("Show Predictions"):
 
                 yearly_data["prediction"] = pd.Series(preds_region, index=yearly_data.index).astype(float)
 
-            # Aggregate by month
             monthly_avg = yearly_data.groupby("month")[["actual_price", "prediction"]].mean().reset_index()
-
-            # Highlight selected month
             monthly_avg["highlight"] = monthly_avg["month"].apply(lambda m: "Selected" if m == month else "Other")
 
             fig = px.line(
@@ -171,7 +167,6 @@ if st.button("Show Predictions"):
                 title=f"Yearly Trend - {year}{'' if region=='All' else f' - {region}'}"
             )
 
-            # Add highlight with background shading
             highlight_month = month
             fig.add_vrect(
                 x0=highlight_month - 0.5,
