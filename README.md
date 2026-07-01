@@ -1,191 +1,161 @@
-## Housing ML end2end Project
+# Housing Price Prediction — End to End ML System
 
-## Project Overview
+An end-to-end machine learning system for predicting housing prices across 30 US metro cities using XGBoost. The project covers the full ML engineering lifecycle: data preprocessing, feature engineering, model training, hyperparameter tuning, REST API serving, and a live interactive dashboard.
 
-Housing Regression MLE is an end-to-end machine learning pipeline for predicting housing prices using XGBoost. The project follows ML engineering best practices with modular pipelines, experiment tracking via MLflow, containerization, AWS cloud deployment, and comprehensive testing. The system includes both a REST API and a Streamlit dashboard for interactive predictions.
+## Live Demo
+
+**Streamlit Dashboard:** [https://housing-price-prediction-ge3cgmmzc6ex99fogegsan.streamlit.app/](https://housing-price-prediction-ge3cgmmzc6ex99fogegsan.streamlit.app/)
+
+> Note: The API backend runs on Render's free tier and may take 30–50 seconds to wake up after inactivity. This is expected — wait a moment and try again if predictions are slow to load.
+
+---
 
 ## Architecture
 
-The codebase is organized into distinct pipelines following the flow:
-`Load → Preprocess → Feature Engineering → Train → Tune → Evaluate → Inference → Batch → Serve`
+```
+Load → Preprocess → Feature Engineering → Train → Tune → Evaluate → Inference → Serve
+```
 
 ### Core Modules
 
-- **`src/feature_pipeline/`**: Data loading, preprocessing, and feature engineering
-  - `load.py`: Time-aware data splitting (train <2020, eval 2020-21, holdout ≥2022)
-  - `preprocess.py`: City normalization, deduplication, outlier removal  
+- **`src/feature_pipeline/`** — Data loading, preprocessing, feature engineering
+  - `load.py`: Time-aware data splitting (train <2020, eval 2020–21, holdout ≥2022)
+  - `preprocess.py`: City normalization, lat/lng merging, deduplication, outlier removal
   - `feature_engineering.py`: Date features, frequency encoding (zipcode), target encoding (city_full)
 
-- **`src/training_pipeline/`**: Model training and hyperparameter optimization
-  - `train.py`: Baseline XGBoost training with configurable parameters
-  - `tune.py`: Optuna-based hyperparameter tuning with MLflow integration
-  - `eval.py`: Model evaluation and metrics calculation
+- **`src/training_pipeline/`** — Model training and hyperparameter optimization
+  - `train.py`: Baseline XGBoost training
+  - `tune.py`: Optuna-based hyperparameter tuning with MLflow experiment tracking
+  - `eval.py`: Model evaluation and metrics
 
-- **`src/inference_pipeline/`**: Production inference
-  - `inference.py`: Applies same preprocessing/encoding transformations using saved encoders
+- **`src/inference_pipeline/`** — Production inference
+  - `inference.py`: Applies saved encoders and aligns schema to training feature order before prediction
 
-- **`src/batch/`**: Batch prediction processing
+- **`src/batch/`** — Batch processing
   - `run_monthly.py`: Generates monthly predictions on holdout data
 
-- **`src/api/`**: FastAPI web service
-  - `main.py`: REST API with S3 integration, health checks, prediction endpoints, and batch processing
+- **`src/api/`** — FastAPI backend
+  - `main.py`: REST API with Cloudflare R2 integration, health checks, prediction and batch endpoints
 
-### Web Applications
-
-- **`app.py`**: Streamlit dashboard for interactive housing price predictions
-  - Real-time predictions via FastAPI integration
+- **`app.py`** — Streamlit dashboard
   - Interactive filtering by year, month, and region
-  - Visualization of predictions vs actuals with metrics (MAE, RMSE, % Error)
-  - Yearly trend analysis with highlighted selected periods
+  - Predictions vs actuals table with MAE, RMSE, and % Error metrics
+  - Yearly trend chart with selected month highlighted
 
-### Cloud Infrastructure & Deployment
+---
 
-- **AWS S3 Integration**: Data and model storage in `housing-regression-data` bucket
-- **Amazon ECR**: Container registry for Docker images
-- **Amazon ECS**: Container orchestration with Fargate
-- **Application Load Balancer**: Traffic distribution and routing
-- **CI/CD Pipeline**: Automated deployment via GitHub Actions
+## Cloud Infrastructure
 
-#### ECS Services:
-- **housing-api-service**: FastAPI backend (port 8000, 1024 CPU, 3072 MB memory)
-- **housing-streamlit-service**: Streamlit dashboard (port 8501, 512 CPU, 1024 MB memory)
+| Component | Service |
+|---|---|
+| Model & Data Storage | Cloudflare R2 (S3-compatible) |
+| API Backend | Render (free tier) |
+| Dashboard | Streamlit Community Cloud |
+| Version Control | GitHub |
 
-### Data Leakage Prevention
+Environment variables (R2 credentials, API URL) are managed securely on each platform — no secrets are stored in the codebase.
 
-The project implements strict data leakage prevention:
-- Time-based splits (not random)
-- Encoders fitted only on training data
-- Leakage-prone columns dropped before training
-- Schema alignment enforced between train/eval/inference
+---
 
-## Common Commands
+## Model Performance
 
-### Environment Setup
+- **Algorithm:** XGBoost Regressor
+- **R²:** 0.9222 on holdout data
+- **Avg % Error:** ~9% on holdout data
+- **Coverage:** 30 US metro cities, time-based train/eval/holdout splits
+
+---
+
+## Data Leakage Prevention
+
+- Time-based splits (not random) — train < 2020, eval 2020–21, holdout ≥ 2022
+- Encoders fitted only on training data, applied to eval/holdout
+- Leakage-prone columns (raw city names, zipcodes) dropped before training
+- Schema and feature order enforced at inference time using the model's own booster feature names
+
+---
+
+## Local Setup
+
+### 1. Install dependencies
+
 ```bash
-# Install dependencies using uv
 uv sync
 ```
 
-### Testing
+### 2. Configure environment
+
+Create a `.env` file in the project root (never commit this):
+
+```
+S3_BUCKET=your-bucket-name
+AWS_REGION=auto
+S3_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+```
+
+### 3. Upload data and model to R2
+
+```bash
+python upload_data.py
+```
+
+### 4. Run the pipeline
+
+```bash
+# Preprocess
+python -m src.feature_pipeline.preprocess
+
+# Feature engineering
+python -m src.feature_pipeline.feature_engineering
+
+# Train
+python src/training_pipeline/train.py
+
+# Tune (with MLflow)
+python src/training_pipeline/tune.py
+
+# Evaluate
+python src/training_pipeline/eval.py
+```
+
+### 5. Start the API
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+### 6. Start the dashboard
+
+```bash
+streamlit run app.py
+```
+
+---
+
+## Testing
+
 ```bash
 # Run all tests
 pytest
 
-# Run specific test modules  
-pytest tests/test_features.py
-pytest tests/test_training.py
-pytest tests/test_inference.py
-
-# Run with verbose output
+# Verbose
 pytest -v
 ```
 
-### Data Pipeline
-```bash
-# 1. Load and split raw data
-python src/feature_pipeline/load.py
+---
 
-# 2. Preprocess splits
-python -m src.feature_pipeline.preprocess
+## Tech Stack
 
-# 3. Feature engineering
-python -m src.feature_pipeline.feature_engineering
-```
+**ML/Data:** Python, XGBoost, scikit-learn, pandas, NumPy, category-encoders
 
-### Training Pipeline
-```bash
-# Train baseline model
-python src/training_pipeline/train.py
+**API & Dashboard:** FastAPI, Uvicorn, Streamlit, Plotly
 
-# Hyperparameter tuning with MLflow
-python src/training_pipeline/tune.py
+**Experiment Tracking:** MLflow, Optuna
 
-# Model evaluation
-python src/training_pipeline/eval.py
-```
+**Storage:** Cloudflare R2 (boto3/S3-compatible)
 
-### Inference
-```bash
-# Single inference
-python src/inference_pipeline/inference.py --input data/raw/holdout.csv --output predictions.csv
+**Deployment:** Render (API), Streamlit Community Cloud (dashboard)
 
-# Batch monthly predictions
-python src/batch/run_monthly.py
-```
-
-### API Service
-```bash
-# Start FastAPI server locally
-uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
-```
-
-### Streamlit Dashboard
-```bash
-# Start Streamlit dashboard locally
-streamlit run app.py --server.port 8501 --server.address 0.0.0.0
-```
-
-### Docker
-```bash
-# Build API container
-docker build -t housing-regression .
-
-# Build Streamlit container  
-docker build -t housing-streamlit -f Dockerfile.streamlit .
-
-# Run API container
-docker run -p 8000:8000 housing-regression
-
-# Run Streamlit container
-docker run -p 8501:8501 housing-streamlit
-```
-
-### MLflow Tracking
-```bash
-# Start MLflow UI (view experiments)
-mlflow ui
-```
-
-## Key Design Patterns
-
-### Pipeline Modularity
-Each pipeline component can be run independently with consistent interfaces. All modules accept configurable input/output paths for testing isolation.
-
-### Cloud-Native Architecture
-- **S3-First Storage**: Models and data automatically sync from S3 buckets
-- **Containerized Services**: Both API and dashboard run in Docker containers  
-- **Auto-scaling Infrastructure**: ECS Fargate provides serverless container scaling
-- **Environment-based Configuration**: Separate configs for local development and production
-
-### Encoder Persistence  
-Frequency and target encoders are saved as pickle files during training and loaded during inference to ensure consistent transformations.
-
-### Configuration Management
-Model parameters, file paths, and pipeline settings use sensible defaults but can be overridden through function parameters or environment variables. Production deployments use AWS environment variables.
-
-### Testing Strategy
-- Unit tests for individual pipeline components
-- Integration tests for end-to-end pipeline flows  
-- Smoke tests for inference pipeline
-- All tests use temporary directories to avoid touching production data
-
-## Dependencies
-
-Key production dependencies (see `pyproject.toml`):
-- **ML/Data**: `xgboost==3.0.4`, `scikit-learn`, `pandas==2.1.1`, `numpy==1.26.4`
-- **API**: `fastapi`, `uvicorn`
-- **Dashboard**: `streamlit`, `plotly`
-- **Cloud**: `boto3` (AWS integration)
-- **Experimentation**: `mlflow`, `optuna`
-- **Quality**: `great-expectations`, `evidently`
-
-## File Structure Notes
-
-- **`data/`**: Raw, processed, and prediction data (time-structured, S3-synced)
-- **`models/`**: Trained models and encoders (pkl files, S3-synced)
-- **`mlruns/`**: MLflow experiment tracking data
-- **`configs/`**: YAML configuration files
-- **`notebooks/`**: Jupyter notebooks for EDA and experimentation
-- **`tests/`**: Comprehensive test suite with sample data
-- **AWS Task Definitions**: `housing-api-task-def.json`, `streamlit-task-def.json`
-- **CI/CD**: `.github/workflows/ci.yml` for automated deployment
+**Tools:** Git, GitHub, Jupyter, joblib, python-dotenv
